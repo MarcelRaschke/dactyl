@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html {% if currentpage.language %}lang="{{currentpage.language}}"{% else %}lang="en"{% endif %}>
+<head>
+    <meta charset="utf-8">
+    <title>{{ currentpage.name }} - {{ target.display_name }}</title>
+    <style type="text/css">
+    @media print {
+        .dactyl-pdf-cover {
+            page-break-after: always;
+        }
+        .dactyl-pdf-toc {
+            page-break-after: always;
+        }
+        .level-1 {
+          margin-left: 1rem;
+        }
+        .level-2 {
+          list-style-type: circle;
+          margin-left: 2rem;
+        }
+        .level-3 {
+          list-style-type: square;
+          margin-left: 3rem;
+        }
+        .dactyl-pdf-cover .dactyl-pdf-title-area {
+            position: absolute;
+            top: 26%;
+            left: 8%;
+            font-size: 60px;
+            max-width: 650px;
+        }
+        .dactyl-pdf-cover h1,
+        .dactyl-pdf-cover h2,
+        .dactyl-pdf-cover h3 {
+            padding: 0;
+            margin: 10px 0 0 0;
+        }
+    }
+    </style>
+</head>
+<body>
+    <div class="dactyl-pdf-cover">
+        <section class="dactyl-pdf-title-area">
+            <h1>{{ target.display_name }}</h1>
+            <h2>{{ current_time }}</h2>
+        </section>
+    </div>
+    <div class="dactyl-pdf-toc">
+        {% set show_blurbs = False %}
+        {% set depth = 99 %}
+        {% include 'children.html' %}
+    </div>
+</body>
+</html>

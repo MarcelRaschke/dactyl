@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>{{ currentpage.name }} - {{ target.display_name }}</title>
+    {% block css %}
+    <style type="text/css">
+    .dactyl-sidebar {
+        float: right;
+        margin: 20px;
+        padding: 20px;
+        border: 1px dashed black;
+    }
+    .dactyl-sidebar ul {
+        padding-left: 20px;
+        margin-left: 0;
+    }
+    .dactyl-sidebar h4 {
+        margin-top: 0;
+    }
+
+    @media screen {
+        footer {
+            position: fixed;
+            bottom: 0;
+            font-size: 10px;
+            background: white;
+        }
+
+        main {
+            padding-bottom: 20px;
+        }
+        body {
+          background-color: white;
+        }
+    }
+
+    @media print {
+      .dactyl-sidebar {display: none;}
+      .hover_anchor {display:none;}
+
+      @page {
+        @bottom-left {
+          content: flow(footer);
+        }
+
+        @bottom-right {
+          content: counter(page);
+          font-size: 10px;
+        }
+      }
+
+      footer {
+        flow: static(footer);
+        font-size: 10px;
+      }
+    }
+    </style>
+    {% endblock %}
+    {% block endhead %}
+    {% endblock %}
+</head>
+<body>
+    {% block rightsidebar %}
+    <aside class="dactyl-sidebar">
+        <h4>Contents</h4>
+        <ul class="dactyl-page-toc">
+            {{ page_toc }}
+        </ul>
+    </aside>
+    {% endblock %}
+
+    {% block main %}
+    <main>{{content}}</main>
+    {% endblock %}
+
+    {% block footer %}
+    <footer>
+      <p>(Exported {{ current_time }})</p>
+    </footer>
+    {% endblock %}
+</body>
+</html>

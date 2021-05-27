@@ -1,72 +1,126 @@
 content_path: content
 template_path: templates
 template_static_path: template_assets
-default_template: template-web.html
-default_pdf_template: template-pdf.html
 filter_paths:
     - custom_filters
     - more_custom_filters
 
+defaults: &defaults
+    hover_anchors: "¶"
+
+spelling_file: spelling.txt
+
 targets:
     -   name: everything
-        display_name: Target with ALL THE EXAMPLES™
+        display_name: Dactyl Examples
         filters:
             - demote_headers
         demote_headers_pdf_only: true
+        stylesheet: template_assets/dactyl.css
+        foo: "fooooooo"
+        <<: *defaults
 
     -   name: filterdemos
         display_name: Target with just the filter example pages
+        <<: *defaults
 
     -   name: conditionals
         display_name: Conditional Text Target
         condition: tests-2
+        <<: *defaults
 
 pages:
-    -   name: Tests
-        html: tests-index.html
-        category: Tests
+    -   name: Features
+        html: features.html
+        category: Features
         section_header: true
+        parent: index.html
+        template: landing.html
+        targets:
+            - everything
+
+    -   md: code-highlighting.md
+        html: code-highlighting.html
+        parent: features.html
         targets:
             - everything
 
     -   md: includes.md
-        category: Tests
+        category: Features
+        parent: features.html
         targets:
             - everything
 
-    -   md: with-frontmatter.md
-        name: placeholder_with_frontmatter_local
-        html: with-frontmatter.html
+    -   md: frontmatter.md
+        html: frontmatter.html
+        parent: features.html
         targets:
             - everything
 
-    -   name: Conditionals Test
-        category: Tests
-        md: conditionals.md
+    -   md: cli-vars.md
+        html: cli-vars.html
+        parent: features.html
+        targets:
+            - everything
+
+    -   md: link-checking.md
+        targets:
+            - everything
+
+    -   md: conditionals.md
+        category: Features
+        parent: features.html
         targets:
             - everything
             - conditionals
 
     -   name: Lists and Code Blocks Demo
-        category: Tests
+        category: Features
         md: lists-and-codeblocks.md
+        parent: features.html
         targets:
             - everything
 
     -   name: GitHub Markdown Compatibility
-        category: Tests
+        category: Features
         md: gfm-compat.md
+        parent: features.html
+        targets:
+            - everything
+
+    -   md: header_stress_test.md
+        category: Features
+        parent: features.html
+        targets:
+            - everything
+
+    -   md: virtual-pages.md
+        targets:
+            - everything
+
+    -   name: Dactyl Homepage
+        parent: virtual-pages.html
+        html: https://dactyl.link/#
+        blurb: This is a placeholder that shows up in navigation but does not have an actual output file. Use this if you want to link to external resources at a specific place in your navigation.
+        targets:
+            - everything
+
+    -   md: virtual-placeholder.md
         targets:
             - everything
 
     -   name: Filters
         category: Filters
         section_header: true
+        parent: index.html
+        template: landing.html
         targets:
             - everything
+            - filterdemos
 
     -   md: filter-examples/callouts.md
         category: Filters
+        parent: filters.html
         targets:
             - everything
             - filterdemos
@@ -75,6 +129,7 @@ pages:
 
     -   md: filter-examples/xrefs.md
         category: Filters
+        parent: filters.html
         targets:
             - everything
             - filterdemos
@@ -83,54 +138,94 @@ pages:
 
     -   md: filter-examples/buttonize.md
         category: Filters
+        parent: filters.html
         targets:
             - everything
             - filterdemos
         filters:
             - buttonize
 
-    -   md: filter-examples/patriots.md
-        html: filter-examples-patriots.html
-        category: Filters
-        targets:
-            - everything
-            - filterdemos
-        filters:
-            - patriots
-
-    -   md: filter-examples/patriots.md
-        name: Custom Filter 2
-        html: filter-examples-patriots2.html
-        category: Filters
-        targets:
-            - everything
-            - filterdemos
-        filters:
-            - patriots2
-
     -   md: filter-examples/badges.md
         category: Filters
+        parent: filters.html
         targets:
             - everything
             - filterdemos
         filters:
             - badges
 
-    -   md: filter-examples/include_code.md
-        category: Filters
-        targets:
-            - everything
-            - filterdemos
-        filters:
-            - include_code
-
     -   md: filter-examples/multicode_tabs.md
         category: Filters
+        parent: filters.html
         targets:
             - everything
             - filterdemos
         filters:
             - multicode_tabs
+
+    -   md: filter-examples/external_links.md
+        targets:
+            - everything
+            - filterdemos
+
+    -   md: extending/index.md
+        html: extending-index.html
+        category: Extending
+        section_header: true
+        parent: index.html
+        template: landing.html
+        targets:
+            - everything
+
+    -   md: extending/extend-templates.md
+        category: Extending
+        parent: extending-index.html
+        targets:
+            - everything
+
+    -   md: extending/hierarchy.md
+        category: Extending
+        parent: extending-index.html
+        template: template-hierarchy.html
+        targets:
+            - everything
+
+    -   md: extending/patriots.md
+        html: filter-examples-patriots.html
+        category: Extending
+        parent: extending-index.html
+        targets:
+            - everything
+        filters:
+            - patriots
+
+    -   md: extending/patriots.md
+        name: Custom Filter 2
+        html: filter-examples-patriots2.html
+        category: Extending
+        parent: extending-index.html
+        targets:
+            - everything
+        filters:
+            - patriots2
+
+    -   md: extending/include_code.md
+        category: Extending
+        parent: extending-index.html
+        targets:
+            - everything
+        filters:
+            - include_code
+
+    -   md: extending/debug.md
+        html: debug.html
+        category: Extending
+        parent: extending-index.html
+        template: template-minimal.html
+        no_highlighting: true
+        targets:
+            - everything
+
 
 # -------------------- Style Checker Rules ------------------------
 word_substitutions_file: plainlanguage_words.yaml

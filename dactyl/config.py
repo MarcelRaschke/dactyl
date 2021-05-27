@@ -3,17 +3,14 @@
 ################################################################################
 from dactyl.common import *
 from dactyl.version import __version__
+from dactyl.page import DactylPage
 
 # Used to import filters.
 from importlib import import_module
 import importlib.util
 
-# Used for pulling in the default config file
-from pkg_resources import resource_stream
-
 # Not the file containing defaults, but the default name of user-specified conf
 DEFAULT_CONFIG_FILE = "dactyl-config.yml"
-BUILTIN_ES_TEMPLATE = "templates/template-es.json"
 
 class DactylConfig:
     def __init__(self, cli_args):
@@ -38,7 +35,10 @@ class DactylConfig:
         else:
             logger.debug("No config file specified, trying ./dactyl-config.yml")
             self.load_config_from_file(DEFAULT_CONFIG_FILE)
+        self.check_consistency()
         self.load_filters()
+
+        self.page_cache = []
 
 
     def set_logging(self):
@@ -77,6 +77,13 @@ class DactylConfig:
 
         self.config.update(loaded_config)
 
+    def check_consistency(self):
+        """
+        Check a loaded config for common errors, such as unused pages,
+        references to non-existing targets, duplicate target names, etc.
+        """
+
+        # Look for poorly or redundantly defined targets
         targetnames = set()
         for t in self.config["targets"]:
             if "name" not in t:
@@ -87,7 +94,7 @@ class DactylConfig:
                     t["name"], self.bypass_errors)
             targetnames.add(t["name"])
 
-        # Check page list for consistency and provide default values
+        # Check page list for consistency
         for page in self.config["pages"]:
             if "targets" not in page:
                 if "name" in page:
@@ -103,14 +110,27 @@ class DactylConfig:
                 recoverable_error("Page '%s' contains undefined targets: %s" %
                             (page, set(page["targets"]).difference(targetnames)),
                             self.bypass_errors)
-            if "md" in page and "name" not in page:
-                logger.debug("Guessing page name for page %s" % page)
-                page_path = os.path.join(self.config["content_path"], page["md"])
-                page["name"] = guess_title_from_md_file(page_path)
 
-            if "html" not in page:
-                page["html"] = self.html_filename_from(page)
+    def load_pages(self):
+        """
+        Preload all config'd pages, not just target pages, to get them
+        default name values.
+        """
 
+        self.page_cache = []
+        skip_pp = self.config.get("skip_preprocessor", False)
+        for page_data in self.config["pages"]:
+            if OPENAPI_SPEC_KEY not in page_data:
+                # Try loading page now; but if it fails, that might be OK
+                # depending on whether we need the file later.
+                try:
+                    self.page_cache.append(DactylPage(self, page_data, skip_pp))
+                except Exception as e:
+                    logger.warning("Couldn't load page '%s': %s"%(page_data,e))
+                    self.page_cache.append(NOT_LOADED_PLACEHOLDER)
+            else:
+                # OpenAPI specs are too much work to load at this time
+                self.page_cache.append(OPENAPI_SPEC_PLACEHOLDER)
 
     def load_filters(self):
         # Figure out which filters we need
@@ -124,59 +144,54 @@ class DactylConfig:
 
         # Try loading from custom filter paths in order, fall back to built-ins
         for filter_name in filternames:
-            filter_loaded = False
-            loading_errors = []
-            if "filter_paths" in self.config:
-                for filter_path in self.config["filter_paths"]:
-                    try:
-                        f_filepath = os.path.join(filter_path, "filter_"+filter_name+".py")
+            self.load_filter(filter_name)
 
-                        ## Requires Python 3.5+
-                        spec = importlib.util.spec_from_file_location(
-                                    "dactyl_filters."+filter_name, f_filepath)
-                        self.filters[filter_name] = importlib.util.module_from_spec(spec)
-                        spec.loader.exec_module(self.filters[filter_name])
+    def load_filter(self, filter_name):
+        """
+        Load a specific filter, if possible. Can be called "late" when parsing
+        frontmatter.
+        """
+        if filter_name in self.filters.keys():
+            return True
 
-                        filter_loaded = True
-                        break
-                    except FileNotFoundError as e:
-                        loading_errors.append({"Path": filter_path, "Error": repr(e)})
-                        logger.debug("Filter %s isn't in path %s\nErr:%s" %
-                                    (filter_name, filter_path, repr(e)))
-                    except Exception as e:
-                        loading_errors.append({"Path": filter_path, "Error": repr(e)})
-                        recoverable_error("Failed to load filter '%s', with error: %s" %
-                                (filter_name, repr(e)), self.bypass_errors)
-
-            if not filter_loaded:
-                # Load from the Dactyl module
+        loading_errors = []
+        if "filter_paths" in self.config:
+            for filter_path in self.config["filter_paths"]:
                 try:
-                    self.filters[filter_name] = import_module("dactyl.filter_"+filter_name)
+                    f_filepath = os.path.join(filter_path, "filter_"+filter_name+".py")
+
+                    ## Requires Python 3.5+
+                    spec = importlib.util.spec_from_file_location(
+                                "dactyl_filters."+filter_name, f_filepath)
+                    self.filters[filter_name] = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(self.filters[filter_name])
+
+                    return True
+
+                except FileNotFoundError as e:
+                    loading_errors.append({"Path": filter_path, "Error": repr(e)})
+                    logger.debug("Filter %s isn't in path %s\nErr:%s" %
+                                (filter_name, filter_path, repr(e)))
                 except Exception as e:
-                    loading_errors.append({"Path": "(Dactyl Built-ins)", "Error": repr(e)})
-                    #logger.debug("Failed to load filter %s. Errors: %s" %
-                    #    (filter_name, loading_errors))
-                    recoverable_error("Failed to load filter %s. Errors:\n%s" %
-                        (filter_name, "\n".join(
-                            ["  %s: %s" % (le["Path"], le["Error"])
-                                for le in loading_errors])
-                        ), self.bypass_errors)
+                    loading_errors.append({"Path": filter_path, "Error": repr(e)})
+                    recoverable_error("Failed to load filter '%s', with error: %s" %
+                            (filter_name, repr(e)), self.bypass_errors)
 
-    def load_style_rules(self):
-        """Reads word and phrase substitution files into the config"""
-        if "word_substitutions_file" in self.config:
-            with open(self.config["word_substitutions_file"], "r", encoding="utf-8") as f:
-                self.config["disallowed_words"] = yaml.load(f)
-        else:
-            logger.warning("No 'word_substitutions_file' found in config.")
-            self.config["disallowed_words"] = {}
+        # Didn't find it yet; try loading it from the Dactyl module
+        try:
+            self.filters[filter_name] = import_module("dactyl.filter_"+filter_name)
+            return True
+        except Exception as e:
+            loading_errors.append({"Path": "(Dactyl Built-ins)", "Error": repr(e)})
+            #logger.debug("Failed to load filter %s. Errors: %s" %
+            #    (filter_name, loading_errors))
+            recoverable_error("Failed to load filter %s. Errors:\n%s" %
+                (filter_name, "\n".join(
+                    ["  %s: %s" % (le["Path"], le["Error"])
+                        for le in loading_errors])
+                ), self.bypass_errors)
 
-        if "phrase_substitutions_file" in self.config:
-            with open(self.config["phrase_substitutions_file"], "r", encoding="utf-8") as f:
-                self.config["disallowed_phrases"] = yaml.load(f)
-        else:
-            logger.warning("No 'phrase_substitutions_file' found in config.")
-            self.config["disallowed_phrases"] = {}
+
 
     def load_build_options(self):
         """Overwrites some build-specific options based on the CLI params"""
@@ -189,39 +204,9 @@ class DactylConfig:
             self.config["template_allow_undefined"] = False
         if self.cli_args.pp_strict_undefined:
             self.config["preprocessor_allow_undefined"] = False
+        if self.cli_args.legacy_prince:
+            self.config["legacy_prince"] = True
 
-    def html_filename_from(self, page):
-        """Take a page definition and choose a reasonable HTML filename for it."""
-        if "md" in page:
-            new_filename = re.sub(r"[.]md$", ".html", page["md"])
-            if self.config.get("flatten_default_html_paths", True):
-                return new_filename.replace(os.sep, "-")
-            else:
-                return new_filename
-        elif "name" in page:
-            return slugify(page["name"]).lower()+".html"
-        else:
-            new_filename = str(time.time()).replace(".", "-")+".html"
-            logger.debug("Generated filename '%s' for page: %s" %
-                        (new_filename, page))
-            return new_filename
-
-    def get_es_template(self, filename):
-        """Loads an ElasticSearch template (as JSON)"""
-        template_path = os.path.join(self.config["template_path"], filename)
-        try:
-            with open(template_path, encoding="utf-8") as f:
-                es_template = json.load(f)
-        except (FileNotFoundError, json.decoder.JSONDecodeError) as e:
-            if type(e) == FileNotFoundError:
-                logger.debug("Didn't find ES template (%s), falling back to default" %
-                    template_path)
-            elif type(e) == json.decoder.JSONDecodeError:
-                recoverable_error(("Error JSON-decoding ES template (%s)" %
-                    template_path), self.bypass_errors)
-            with resource_stream(__name__, BUILTIN_ES_TEMPLATE) as f:
-                es_template = json.load(f)
-        return es_template
 
     def __getitem__(self, key):
         return self.config[key]

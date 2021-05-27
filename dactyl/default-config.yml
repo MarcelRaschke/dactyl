@@ -39,6 +39,8 @@ es_index_fields:
 es_index_separator: '-'
 
 prince_executable: prince
+# Disable --no-warn-css for compatibility with older Prince versions:
+legacy_prince: false
 
 ## If this is true, parses the files as Markdown without Jinja syntax
 skip_preprocessor: false
@@ -54,9 +56,12 @@ preprocessor_allow_undefined: true
 ## the input md files.
 flatten_default_html_paths: true
 
+## Set this to true to disable Dactyl's built-in syntax highlighting
+no_highlighting: false
+
 ## Default templates.
-default_template: template-default.html
-default_pdf_template: template-default.html
+default_template: doc.html
+default_pdf_template: simple.html
 default_es_template: template-es.json
 
 time_format: "%Y-%m-%d" # Used to be "%B %d, %Y"
@@ -65,8 +70,8 @@ time_format: "%Y-%m-%d" # Used to be "%B %d, %Y"
 cover_page:
     html: index.html
     name: Index
-    pdf_template: template-pdf_cover.html
-    template: template-index.html
+    pdf_template: pdf-cover.html
+    template: landing.html
 
 ## List of targets you can build. Each target corresponds to a single PDF file
 targets: []

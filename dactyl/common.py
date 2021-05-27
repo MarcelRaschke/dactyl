@@ -12,19 +12,50 @@ import re
 import time
 import traceback
 
+from pkg_resources import resource_stream
+
 import ruamel.yaml
 yaml = ruamel.yaml.YAML(typ="safe")
 
+import gettext
+
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.StreamHandler())
+logger.propagate = False
 
-DEFAULT_PDF_FILE = "__DEFAULT_FILENAME__"
+PACKAGE_NAME = "dactyl" # Used for Jinja PackageLoader
+
+PDF_USE_DEFAULT = "__DEFAULT_FILENAME__"
 NO_PDF = "__NO_PDF__"
-DEFAULT_ES_URL = "__DEFAULT_ES_HOST__"
-NO_ES_UP = "__NO_ES_UP__"
+ES_USE_DEFAULT = "__ES_USE_DEFAULT__"
+NO_ES_UP = False
 
-def recoverable_error(msg, bypass_errors):
+# These fields are special, and pages don't inherit them directly
+RESERVED_KEYS_TARGET = [
+    "name",
+    "display_name",
+    "pages",
+]
+ADHOC_TARGET = "__ADHOC__"
+UNTITLED_TARGET = "(Untitled)"
+
+PROVIDED_FILENAME_KEY = "__dactyl_provided_filename__"
+ES_EVAL_KEY = "__dactyl_eval__"
+OPENAPI_SPEC_KEY = "openapi_specification"
+OPENAPI_TEMPLATE_PATH_KEY = "openapi_md_template_path"
+OPENAPI_SPEC_PLACEHOLDER = "__OPENAPI_SPEC_PLACEHOLDER__"
+NOT_LOADED_PLACEHOLDER = "__NOT_LOADED_PLACEHOLDER__"
+API_SLUG_KEY = "api_slug"
+BUILTIN_ES_TEMPLATE = "templates/template-es.json"
+HOVERANCHOR_FIELD = "hover_anchors"
+
+DEFAULT_SERVER_PORT = 32289 # "DACTY" in T-9
+
+
+def recoverable_error(msg, bypass_errors, error=None):
     """Logs a warning/error message and exits if bypass_errors==False"""
+    if not bypass_errors and error is not None:
+        traceback.print_tb(error.__traceback__)
     logger.error(msg)
     if not bypass_errors:
         exit(1)
@@ -40,35 +71,6 @@ def slugify(s):
         s = "_"
     return s
 
-def guess_title_from_md_file(filepath):
-    """Takes the path to an md file and return a suitable title.
-    If the first two lines look like a Markdown header, use that.
-    Otherwise, return the filename."""
-    try:
-        with open(filepath, "r", encoding="utf-8") as f:
-            line1 = f.readline()
-            line2 = f.readline()
-
-            # look for headers in the "followed by ----- or ===== format"
-            ALT_HEADER_REGEX = re.compile("^[=-]{3,}$")
-            if ALT_HEADER_REGEX.match(line2):
-                possible_header = line1
-                if possible_header.strip():
-                    return possible_header.strip()
-
-            # look for headers in the "## abc ## format"
-            HEADER_REGEX = re.compile("^#+\s*(.+[^#\s])\s*#*$")
-            m = HEADER_REGEX.match(line1)
-            if m:
-                possible_header = m.group(1)
-                if possible_header.strip():
-                    return possible_header.strip()
-    except FileNotFoundError as e:
-        logger.warning("Couldn't guess title of page (file not found): %s" % e)
-
-    #basically if the first line's not a markdown header, we give up and use
-    # the filename instead
-    return os.path.basename(filepath)
 
 def parse_frontmatter(text):
     """Separate YAML frontmatter, if any, from a string, and return the
@@ -88,9 +90,31 @@ def parse_frontmatter(text):
             frontmatter["name"] = frontmatter["title"]
         if "categories" in frontmatter.keys() and len(frontmatter["categories"]):
             frontmatter["category"] = frontmatter["categories"][0]
-        print("Loaded frontmatter:", frontmatter)#TODO: remove me
+        logger.debug("Loaded frontmatter: %s"% frontmatter)
 
         return text[text.find("---", 3)+4:], frontmatter
     else:
         logger.debug("...no front matter detected")
         return text, {}
+
+def merge_dicts(default_d, specific_d, reserved_keys_top=[], override=False):
+    """
+    Extend specific_d with values from default_d (recursively), keeping values
+    from specific_d where they both exist. (This is like dict.update() but
+    by default doesn't overwrite duplicate keys in the updated dict.)
+
+    reserved_keys_top is only used at the top level, not recursively
+
+    override=True means that values in the default_d take precedence over values
+    for the same field in the specific_d.
+    """
+    for key,val in default_d.items():
+        if key in reserved_keys_top:
+            continue
+        if key not in specific_d.keys():
+            specific_d[key] = val
+        elif type(specific_d[key]) == dict and type(val) == dict:
+            merge_dicts(val, specific_d[key])
+        elif override:
+            specific_d[key] = val
+        #else leave the key in the specific_d

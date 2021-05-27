@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block head %}
+
+    <script>
+        $(document).ready(function() {
+            $(".multicode").minitabs();
+            make_code_expandable();
+        });
+    </script>
+
+{% endblock %}
+
+{% block right_sidebar %}
+{% include 'page-toc.html' %}
+{% endblock %}
+
+{% block endbody %}
+{% if target.google_analytics_tag is defined %}
+<script type="application/javascript">
+  gtag('set', {'content_group1': 'Content Docs'});
+</script>
+{% endif %}
+{% endblock %}

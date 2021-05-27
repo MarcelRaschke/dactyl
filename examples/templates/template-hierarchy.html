@@ -1,0 +1,29 @@
+{% extends 'doc.html' %}
+
+{% block main %}
+<section class="pt-3 p-md-3">
+  <article class="dactyl-content">
+    {{ content}}
+
+    <ul>
+    {% macro page_w_children(pg) %}
+      <li class="dactyl-toc-entry"><a href="{{ pg.html }}">{{ pg.name }}</a></li>
+      {% if pg.children %}
+        <ul>
+          {% for child in pg.children %}
+            {{ page_w_children(child) }}
+          {% endfor %}
+        </ul>
+      {% endif %}
+    {% endmacro %}
+    
+    {% for page in pages %}
+      {% if page.parent is undefined %}
+        {{ page_w_children(page) }}
+      {% endif %}
+    {% endfor %}
+    </ul>
+
+  </article>
+</section>
+{% endblock %}

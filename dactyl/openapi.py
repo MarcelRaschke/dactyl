@@ -7,6 +7,8 @@
 import jinja2
 import json
 import requests
+import datetime
+from urllib.parse import unquote as urldecode
 from copy import deepcopy
 from ruamel.yaml.comments import CommentedMap as YamlMap
 from ruamel.yaml.comments import CommentedSeq as YamlSeq
@@ -24,6 +26,7 @@ DATA_TYPES_TOC_TEMPLATE = "template-openapi_data_types_toc.md"
 DATA_TYPE_TEMPLATE = "template-openapi_data_type.md"
 
 class ApiDef:
+    cached_specs = {}
     def __init__(self, spec_path, api_slug=None, extra_fields={},
                 template_path=None):
         self.read_swag(spec_path)
@@ -42,6 +45,21 @@ class ApiDef:
 
         self.extra_fields = extra_fields
         self.setup_jinja_env(template_path)
+
+    @classmethod
+    def from_path(cls, spec_path, api_slug=None, extra_fields={},
+                template_path=None):
+        """
+        Instantiate an ApiDef instance only if we haven't done so already. This
+        saves the trouble of fetching & parsing API specs more than once.
+        """
+        if spec_path in cls.cached_specs.keys():
+            return cls.cached_specs[spec_path]
+
+        apidef = cls(spec_path, api_slug=api_slug,
+                extra_fields=extra_fields, template_path=template_path)
+        cls.cached_specs[spec_path] = apidef
+        return apidef
 
     def read_swag(self, spec_path):
         """Read the OpenAPI definition from either a local file or a URL, and
@@ -63,16 +81,35 @@ class ApiDef:
         """Sets up the environment used to inject OpenAPI data into Markdown
         templates"""
         if template_path is None:
-            loader = jinja2.PackageLoader(__name__)
+            loader = jinja2.PackageLoader(PACKAGE_NAME)
         else:
             logger.debug("OpenAPI spec: preferring templates from %s"%template_path)
             loader = jinja2.ChoiceLoader([
                 jinja2.FileSystemLoader(template_path),
-                jinja2.PackageLoader(__name__)
+                jinja2.PackageLoader(PACKAGE_NAME)
             ])
-        self.env = jinja2.Environment(loader=loader)
+        self.env = jinja2.Environment(loader=loader, extensions=['jinja2.ext.i18n'])
         self.env.lstrip_blocks = True
         self.env.rstrip_blocks = True
+
+    @staticmethod
+    def dig(parts, context):
+        """
+        Search a context object for something matching a $ref (recursive)
+        """
+        key = parts[0].replace("~1", "/").replace("~0", "~") # unescaped
+        key = urldecode(key)
+        try:
+            key = int(key)
+        except:
+            pass
+        if key not in context.keys():
+            raise IndexError(key)
+
+        if len(parts) == 1:
+            return context[key]
+        else:
+            return ApiDef.dig(parts[1:], context[key])
 
     def deref(self, ref):
         """Look through the YAML for a specific reference key, and return
@@ -87,21 +124,7 @@ class ApiDef:
         parts = ref[2:].split("/")
         assert len(parts) > 0
 
-        def dig(parts, context):
-            key = parts[0].replace("~1", "/").replace("~0", "~") # unescaped
-            try:
-                key = int(key)
-            except:
-                pass
-            if key not in context.keys():
-                raise IndexError(key)
-
-            if len(parts) == 1:
-                return context[key]
-            else:
-                return dig(parts[1:], context[key])
-
-        return dig(parts, self.swag)
+        return self.dig(parts, self.swag)
 
     def deref_swag(self):
         """
@@ -142,6 +165,12 @@ class ApiDef:
         for key,schema in schemas.items():
             title = schema.get("title", key)
             schema["title"] = title
+            if "example" in schema:
+                try:
+                    j = json.dumps(schema["example"], indent=4, default=self.json_default)
+                    schema["example"] = j
+                except Exception as e:
+                    logger.debug("%s example isn't json: %s"%(title,j))
         self.deref_swag()
 
         # Find all tags used in endpoints and add any undefined ones to the
@@ -204,15 +233,22 @@ class ApiDef:
         if not content:
             return ""
         for mediatype,content_inner in content.items():
-            try:
-                ex = list(content_inner["examples"].values())[0]["value"]
-            except (IndexError, KeyError, AttributeError) as e:
-                logger.debug("Media type %s didn't have an example value"%mediatype)
-                return ""
+            if "example" in content_inner:
+                # single example
+                ex = content_inner["example"]
+            else:
+                try:
+                    # multiple examples? use the first one
+                    ex = list(content_inner["examples"].values())[0]["value"]
+                except (IndexError, KeyError, AttributeError) as e:
+                    logger.debug("Media type %s didn't have an example value"%mediatype)
+                    return ""
 
             try:
-                ex_pp = json.dumps(ex, indent=4, separators=(',', ': '))
-            except TypeError:
+                ex_pp = json.dumps(ex, indent=4, separators=(',', ': '), default=self.json_default)
+            except TypeError as e:
+                traceback.print_tb(e.__traceback__)
+                logger.debug("json dumps failed on example '%s'"%ex)
                 ex_pp = ex
             return ex_pp
 
@@ -270,6 +306,8 @@ class ApiDef:
             "blurb": "List of methods/endpoints available in "+self.api_title,
             "category": "All "+self.api_title+" Methods",
         })
+        if "parent" not in toc_page:
+            toc_page["parent"] = "index.html"
         pages.append(toc_page)
 
         # add a table of contents per tag
@@ -281,6 +319,7 @@ class ApiDef:
                 "html": self.api_slug+"-"+tag["name"]+METHOD_TOC_SUFFIX+".html",
                 "blurb": tag.get("description",""),
                 "category": tag["name"].title()+" Methods",
+                "parent": toc_page["html"],
             })
             pages.append(tag_toc_page)
 
@@ -296,6 +335,7 @@ class ApiDef:
                     "html": self.method_link(path, method, endpoint),
                     "blurb": endpoint.get("description", endpoint["operationId"]+" method"),
                     "category": tag0+" Methods",
+                    "parent": tag_toc_page["html"],
                 })
                 pages.append(method_page)
 
@@ -307,6 +347,7 @@ class ApiDef:
             "html": self.api_slug+DATA_TYPES_SUFFIX+".html",
             "blurb": "List of all data types defined for "+self.api_title,
             "category": self.api_title+" Data Types",
+            "parent": toc_page["html"],
         })
         pages.append(data_types_page)
 
@@ -320,10 +361,20 @@ class ApiDef:
                 "html": self.type_link(title),
                 "blurb": "Definition of "+title+" data type",
                 "category": self.api_title+" Data Types",
+                "parent": data_types_page["html"],
             })
             pages.append(data_type_page)
 
         return pages
+
+    def add_metadata(self, target_data):
+        """
+        Extend the provided target_data dictionary with metadata pulled from
+        the spec.
+        """
+        info = self.swag.get("info", {"title":self.api_title, "version":"0.0.0"})
+        target_data["info"] = info
+
 
     def new_context(self):
         return {
@@ -333,9 +384,34 @@ class ApiDef:
             "HTTP_METHODS": HTTP_METHODS,
             "HTTP_STATUS_CODES": HTTP_STATUS_CODES,
             "spec": self.swag,
-            "debug": print,#TODO:remove
+            "debug": logger.debug,
             "slugify": slugify,
+            "md_escape": self.md_escape,
         }
+
+    @staticmethod
+    def md_escape(text):
+        """
+        Escape potential Markdown syntax in a string.
+        This is meant to be passed to the templates.
+        """
+        specialchars = "\\`*_{}[]()#+-.!"
+        s = ""
+        for c in text:
+            if c in specialchars:
+                s += "\\"
+            s += c
+        return s
+
+    @staticmethod
+    def json_default(o):
+        """
+        Serializer function for JSON (from YAML)
+        """
+        if isinstance(o, (datetime.date, datetime.datetime)):
+            return o.isoformat()
+        else:
+            return str(o)
 
     def type_link(self, title):
         # TODO: in "md" mode, use ".md" suffix

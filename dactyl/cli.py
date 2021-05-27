@@ -31,7 +31,7 @@ class DactylCLIParser:
         if utility == self.UTIL_BUILD:
             build_mode = parser.add_mutually_exclusive_group(required=False)
             build_mode.add_argument("--pdf", nargs="?", type=str,
-                                const=DEFAULT_PDF_FILE, default=NO_PDF,
+                                const=PDF_USE_DEFAULT, default=NO_PDF,
                                 help="Output a PDF to this file. Requires Prince.")
             build_mode.add_argument("--md", action="store_true",
                                 help="Output markdown only")
@@ -55,7 +55,7 @@ class DactylCLIParser:
                         help="Copy only the content's static files to the out dir",
                         default=False)
             parser.add_argument("--es_upload", nargs="?", type=str,
-                                const=DEFAULT_ES_URL, default=NO_ES_UP,
+                                const=ES_USE_DEFAULT, default=NO_ES_UP,
                                 help="Upload documents to ElasticSearch cluster "+
                                 "at this URL (http://localhost:9200 by default). "+
                                 "Ignored when making PDFs.")
@@ -89,16 +89,36 @@ class DactylCLIParser:
             parser.add_argument("--vars", type=str, help="A YAML or JSON file with vars "+
                                 "to add to the target so the preprocessor and "+
                                 "templates can reference them.")
-            parser.add_argument("--watch", "-w", action="store_true",
+            parser.add_argument("--watch", "-w", action="store_true", default=False,
                                 help="Watch for changes and re-generate output. "+\
                                 "This runs until force-quit.")
+            parser.add_argument("--http_port", type=int, default=DEFAULT_SERVER_PORT,
+                                help="Use this port for HTTP server (when "+\
+                                "building PDFs.) Use '0' for no server (may not "+\
+                                "work well with PDFs containing absolute links)")
+            parser.add_argument("--legacy_prince", action="store_true",
+                                help="When building PDFs, disable options that aren't"+\
+                                "supported by older versions of Prince.",
+                                default=False)
 
         elif utility == self.UTIL_LINKS:
             parser.add_argument("-o", "--offline", action="store_true",
-               help="Check local anchors only")
+                help="Check local anchors only")
+            parser.add_argument("-d", "--dir", type=str, default=None,
+                help="Check the specified dir (otherwise use configured out_dir)")
             parser.add_argument("-s", "--strict", action="store_true",
                 help="Exit with error even on known problems")
             parser.add_argument("-n", "--no_final_retry", action="store_true",
                 help="Don't wait and retry failed remote links at the end.")
+            prefixes = parser.add_mutually_exclusive_group(required=False)
+            prefixes.add_argument("-p", "--prefix", type=str, default="/",
+                help="Assume site starts at this path. Must start with '/'")
+            prefixes.add_argument("--no_prefix", action="store_true", default=False,
+                help="Don't check absolute links")
+
+        if utility == self.UTIL_STYLE:
+            parser.add_argument("--only", type=str, help=".html filename of a "+
+                                "single page in the config to check alone.")
+
 
         self.cli_args = parser.parse_args()
